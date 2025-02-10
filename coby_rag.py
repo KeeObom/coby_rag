@@ -10,6 +10,9 @@ from langchain_ollama import OllamaEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_ollama.llms import OllamaLLM
 
+# Set this flag to True or False to control if the thinking process is shown in the response
+show_thinking_process = False
+
 template = """
 You are an assistant for question-answering tasks. Use the following pieces of retrieved context to answer the question. If you don't know the answer, just say that you don't know. Use three sentences maximum and keep the answer concise.
 Question: {question}
@@ -21,15 +24,9 @@ pdfs_directory = "/Users/apple/Documents/ML Projects/coby/pdfs/"
 faiss_db_path = "/Users/apple/Documents/ML Projects/coby/faiss_index"  # Path to store FAISS index
 
 embeddings = OllamaEmbeddings(model="deepseek-r1:1.5b")
-#vector_store = InMemoryVectorStore(embeddings)
-# Check if FAISS index exists, load it, otherwise create a new one
-# if os.path.exists(faiss_db_path):
-#     vector_store = FAISS.load_local(faiss_db_path, embeddings)
-# else:
-#     vector_store = FAISS.from_documents([], embeddings)
 
-# Function to load FAISS if it exists, else return None
-
+# Initialize chat history
+chat_history = []
 
 def load_or_create_faiss():
     if os.path.exists(faiss_db_path):
@@ -89,10 +86,23 @@ def answer_question(question, documents):
     if not documents:
         return "I couldn't find relevant information in the indexed documents."
     context = "\n\n".join([doc.page_content for doc in documents])
-    prompt = ChatPromptTemplate.from_template(template)
+
+    # Add chat history context for continuous conversation
+    conversation_history = "\n".join([f"User: {q}\nAssistant: {a}" for q, a in chat_history])
+
+    # Construct the full context with the conversation history and the current question
+    full_context = f"{conversation_history}\n\nQuestion: {question}\nContext: {context}\nAnswer:"
+
+    prompt = ChatPromptTemplate.from_template(full_context)
     chain = prompt | model
 
-    return chain.invoke({"question": question, "context": context})
+    answer = chain.invoke({"question": question, "context": context})
+
+    # Optionally show thinking process
+    if show_thinking_process:
+        return f"Thinking...\n\n{answer}"
+    else:
+        return answer
 
 
 # Streamlit UI
@@ -101,20 +111,6 @@ uploaded_file = st.file_uploader(
     type="pdf",
     accept_multiple_files=False
 )
-
-# if uploaded_file:
-#     upload_pdf(uploaded_file)
-#     documents = load_pdf(pdfs_directory + uploaded_file.name)
-#     chunked_documents = split_text(documents)
-#     index_docs(chunked_documents)
-
-#     question = st.chat_input()
-
-#     if question:
-#         st.chat_message("user").write(question)
-#         related_documents = retrieve_docs(question)
-#         answer = answer_question(question, related_documents)
-#         st.chat_message("assistant").write(answer)
 
 
 if uploaded_file:
@@ -132,6 +128,11 @@ question = st.chat_input()
 
 if question:
     st.chat_message("user").write(question)
+    
     related_documents = retrieve_docs(question)
     answer = answer_question(question, related_documents)
+
+    # Save the assistant's answer in chat history
+    chat_history.append((question, answer))
+
     st.chat_message("assistant").write(answer)
